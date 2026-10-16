@@ -1,0 +1,1888 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Solitario Carta Blanca (FreeCell Pro)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@700;800&family=Inter:wght@400;500;600;700;800&display=swap');
+
+    :root {
+      --card-w: clamp(42px, 9.8vw, 86px);
+      --card-h: calc(var(--card-w) * 1.42);
+      --card-overlap: clamp(23px, 4.2vw, 33px);
+    }
+
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: manipulation;
+      overflow-x: hidden;
+      background-color: #052313;
+    }
+
+    /* Textura de paño de mesa verde de casino */
+    .felt-table {
+      background-color: #083b20;
+      background-image: 
+        radial-gradient(circle at 50% 20%, rgba(22, 142, 79, 0.95) 0%, rgba(5, 35, 19, 0.98) 80%),
+        radial-gradient(rgba(255, 255, 255, 0.04) 1.5px, transparent 1.5px);
+      background-size: 100% 100%, 22px 22px;
+    }
+
+    /* Ranuras de colocación */
+    .slot-box {
+      width: var(--card-w);
+      height: var(--card-h);
+      border-radius: clamp(6px, 1.2vw, 10px);
+      border: 2px dashed rgba(255, 255, 255, 0.22);
+      background: rgba(0, 0, 0, 0.22);
+      box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.55);
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: border-color 0.15s ease, background-color 0.15s ease;
+    }
+
+    .slot-box.drag-hover {
+      border-color: #38bdf8 !important;
+      background: rgba(56, 189, 248, 0.25) !important;
+      box-shadow: 0 0 16px rgba(56, 189, 248, 0.6) !important;
+    }
+
+    /* Columnas en Cascada (Tableau) */
+    .cascade-column {
+      width: var(--card-w);
+      min-height: calc(var(--card-h) * 2.8);
+      position: relative;
+      border-radius: clamp(6px, 1.2vw, 10px);
+      transition: background-color 0.15s ease;
+    }
+
+    .cascade-column.drag-hover {
+      background: rgba(56, 189, 248, 0.16);
+      box-shadow: 0 0 14px rgba(56, 189, 248, 0.3);
+    }
+
+    /* Cartas Físicas */
+    .card {
+      width: var(--card-w);
+      height: var(--card-h);
+      border-radius: clamp(6px, 1.2vw, 10px);
+      background: #ffffff;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.25);
+      position: absolute;
+      top: 0;
+      left: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      border: 1px solid rgba(0, 0, 0, 0.12);
+      user-select: none;
+      -webkit-user-select: none;
+      will-change: transform, box-shadow, opacity;
+      transition: transform 0.12s ease-out, box-shadow 0.12s ease-out;
+      overflow: hidden;
+    }
+
+    /* Estados de cursor */
+    .card-movable {
+      cursor: grab;
+    }
+    .card-movable:active {
+      cursor: grabbing;
+    }
+    .card-blocked {
+      cursor: not-allowed !important;
+      filter: contrast(0.96);
+    }
+
+    /* Ocultar cartas temporalmente en el origen */
+    .card-hidden-source {
+      opacity: 0 !important;
+      pointer-events: none !important;
+    }
+
+    .card-dragging-source {
+      opacity: 0.18 !important;
+      pointer-events: none !important;
+    }
+
+    /* Selección activa mediante clic */
+    .card-selected {
+      box-shadow: 0 0 0 3px #f59e0b, 0 12px 24px rgba(0, 0, 0, 0.6) !important;
+      transform: translateY(-5px);
+    }
+
+    /* Animación de carta bloqueada (Shake) */
+    @keyframes shake-card {
+      0%, 100% { transform: translateX(0); }
+      20% { transform: translateX(-6px) rotate(-1.5deg); }
+      40% { transform: translateX(6px) rotate(1.5deg); }
+      60% { transform: translateX(-4px) rotate(-1deg); }
+      80% { transform: translateX(4px) rotate(1deg); }
+    }
+
+    .card-shake {
+      animation: shake-card 0.35s ease-in-out !important;
+    }
+
+    /* Pistas visuales (Hint) */
+    .card-hint-src {
+      box-shadow: 0 0 0 3px #38bdf8, 0 0 16px rgba(56, 189, 248, 0.9) !important;
+      animation: bounce-hint 0.8s infinite alternate ease-in-out;
+    }
+
+    .card-hint-dst {
+      box-shadow: 0 0 0 3px #10b981, 0 0 16px rgba(16, 185, 129, 0.9) !important;
+    }
+
+    @keyframes bounce-hint {
+      from { transform: translateY(0); }
+      to { transform: translateY(-7px); }
+    }
+
+    /* Colores y tipografía de cartas */
+    .card-red { color: #e11d48; }
+    .card-black { color: #0f172a; }
+
+    /* Contenedor Horizontal para Rango y Símbolo (Side-by-Side) */
+    .card-index-box {
+      display: inline-flex;
+      align-items: center;
+      gap: clamp(1px, 0.4vw, 3px);
+      line-height: 1;
+      padding: clamp(2px, 0.5vw, 4px) clamp(3px, 0.7vw, 6px);
+      white-space: nowrap;
+    }
+
+    .card-rank {
+      font-weight: 800;
+      font-size: clamp(11px, 2.2vw, 17px);
+      letter-spacing: -0.5px;
+    }
+
+    .card-suit {
+      font-size: clamp(11px, 2.2vw, 16px);
+      font-weight: 900;
+    }
+
+    .card-center-icon {
+      font-size: clamp(16px, 3.8vw, 32px);
+      line-height: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: auto 0;
+    }
+
+    /* Contenedor de cartas en animación de vuelo */
+    .flying-card-ghost {
+      position: fixed;
+      pointer-events: none !important;
+      z-index: 99999;
+      will-change: transform;
+      transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.25, 1);
+    }
+
+    /* Lienzo de victoria transparente a eventos */
+    #victory-canvas {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      pointer-events: none !important;
+      z-index: 50;
+      display: none;
+    }
+  </style>
+</head>
+<body class="felt-table min-h-screen text-slate-100 flex flex-col justify-between select-none">
+
+  <!-- ================= BARRA SUPERIOR DE HERRAMIENTAS ================= -->
+  <header class="w-full bg-slate-900/95 backdrop-blur-md border-b border-emerald-800/60 px-3 py-2 z-[60] shadow-2xl relative">
+    <div class="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-2">
+      
+      <!-- Identidad del Juego -->
+      <div class="flex items-center gap-2">
+        <span class="text-2xl filter drop-shadow">🎴</span>
+        <div>
+          <h1 class="text-sm md:text-lg font-bold tracking-wider text-white" style="font-family: 'Cinzel', serif;">
+            CARTA BLANCA
+          </h1>
+          <div class="text-[10px] text-emerald-300 font-semibold tracking-wide hidden sm:block">
+            EDICIÓN PROFESIONAL FREECELL
+          </div>
+        </div>
+      </div>
+
+      <!-- Métricas: Pasos y Cronómetro -->
+      <div class="flex items-center gap-3 bg-black/60 px-3 py-1.5 rounded-full border border-emerald-600/40 text-xs md:text-sm font-mono shadow-inner">
+        <div class="flex items-center gap-1.5" title="Movimientos realizados">
+          <span class="text-slate-400">PASOS:</span>
+          <span id="move-counter" class="font-bold text-amber-400">0</span>
+        </div>
+        <div class="h-3 w-px bg-slate-700"></div>
+        <div class="flex items-center gap-1.5" title="Tiempo transcurrido">
+          <span class="text-slate-400">TIEMPO:</span>
+          <span id="timer-display" class="font-bold text-emerald-300">00:00</span>
+        </div>
+        <div class="h-3 w-px bg-slate-700 hidden sm:block"></div>
+        <div class="items-center gap-1.5 hidden sm:flex" title="Semilla del reparto actual">
+          <span class="text-slate-500 text-[11px]">#</span>
+          <span id="deal-seed-display" class="font-bold text-slate-300 text-xs">000000</span>
+        </div>
+      </div>
+
+      <!-- Selector de Dificultad -->
+      <div class="flex items-center gap-1.5 text-xs">
+        <label for="difficulty-select" class="text-slate-300 font-medium hidden md:inline">Dificultad:</label>
+        <select id="difficulty-select" class="bg-slate-800 text-emerald-300 border border-emerald-600/60 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-400 font-bold cursor-pointer">
+          <option value="easy">Fácil (6 Celdas)</option>
+          <option value="normal" selected>Normal (4 Celdas)</option>
+          <option value="hard">Difícil (3 Celdas)</option>
+          <option value="expert">Experto (2 Celdas)</option>
+        </select>
+      </div>
+
+      <!-- Botones de Acción -->
+      <div class="flex items-center gap-1 sm:gap-2">
+        <button id="btn-undo" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1 transition shadow border border-slate-700 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed" title="Deshacer jugada (Ctrl+Z)">
+          <span>↩</span>
+          <span class="hidden sm:inline">Deshacer</span>
+        </button>
+
+        <button id="btn-hint" class="px-2.5 py-1.5 rounded-lg bg-amber-600/90 hover:bg-amber-600 text-white text-xs font-semibold flex items-center gap-1 transition shadow border border-amber-500/50 active:scale-95" title="Mostrar sugerencia">
+          <span>💡</span>
+          <span class="hidden sm:inline">Pista</span>
+        </button>
+
+        <button id="btn-auto" class="px-2.5 py-1.5 rounded-lg bg-sky-700 hover:bg-sky-600 text-white text-xs font-semibold flex items-center gap-1 transition shadow border border-sky-500/50 active:scale-95" title="Auto-completar jugadas seguras">
+          <span>⚡</span>
+          <span class="hidden sm:inline">Auto</span>
+        </button>
+
+        <button id="btn-audio" class="p-1.5 sm:px-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs transition border border-slate-700" title="Activar/Silenciar sonido">
+          <span id="audio-icon">🔊</span>
+        </button>
+
+        <button id="btn-restart" class="p-1.5 sm:px-2.5 sm:py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition border border-slate-700 active:scale-95" title="Reiniciar reparto actual">
+          <span>🔄</span>
+          <span class="hidden md:inline">Reiniciar</span>
+        </button>
+
+        <button id="btn-new-game" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition shadow-lg border border-emerald-400 active:scale-95" title="Nueva partida aleatoria">
+          <span>✨</span>
+          <span class="hidden sm:inline">Nueva</span>
+        </button>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- ================= NOTIFICACIONES TOAST ================= -->
+  <div id="toast-msg" class="fixed top-16 left-1/2 -translate-x-1/2 bg-slate-900/95 text-emerald-300 border border-emerald-500/60 px-4 py-1.5 rounded-full text-xs font-semibold shadow-2xl pointer-events-none opacity-0 transition-opacity duration-200 z-[100002]">
+    Notificación
+  </div>
+
+  <!-- ================= TABLERO DE JUEGO ================= -->
+  <main class="flex-1 max-w-6xl w-full mx-auto px-2 py-3 flex flex-col justify-start items-center gap-3">
+    
+    <!-- Fila Superior: Celdas Libres (Izquierda) + Fundaciones (Derecha) -->
+    <div class="w-full flex items-start justify-between gap-2 max-w-5xl">
+      
+      <!-- Celdas Libres -->
+      <div class="flex flex-col gap-1">
+        <div class="text-[11px] font-bold tracking-wider text-emerald-200/90 flex items-center gap-1.5">
+          <span>CELDAS LIBRES</span>
+          <span id="freecells-count-badge" class="bg-black/50 px-1.5 py-0.5 rounded text-[10px] text-amber-300 font-mono">4</span>
+        </div>
+        <div id="free-cells-container" class="flex items-center gap-1.5 sm:gap-2">
+          <!-- Ranuras inyectadas dinámicamente según la dificultad -->
+        </div>
+      </div>
+
+      <!-- Emblema de Naipes Central -->
+      <div class="hidden lg:flex flex-col items-center justify-center pt-2 opacity-40 select-none pointer-events-none">
+        <div class="text-xl tracking-widest font-serif text-white">♠ ♥ ♣ ♦</div>
+        <div class="text-[9px] tracking-widest text-emerald-200 font-bold">SOLITAIRE</div>
+      </div>
+
+      <!-- Fundaciones -->
+      <div class="flex flex-col items-end gap-1">
+        <div class="text-[11px] font-bold tracking-wider text-emerald-200/90">FUNDACIONES</div>
+        <div class="flex items-center gap-1.5 sm:gap-2">
+          <div class="slot-box foundation-slot" data-drop-zone="foundation" data-suit="hearts" title="Fundación Corazones (A -> K)">
+            <span class="text-red-500/35 text-2xl font-serif pointer-events-none">♥</span>
+          </div>
+          <div class="slot-box foundation-slot" data-drop-zone="foundation" data-suit="diamonds" title="Fundación Diamantes (A -> K)">
+            <span class="text-red-500/35 text-2xl font-serif pointer-events-none">♦</span>
+          </div>
+          <div class="slot-box foundation-slot" data-drop-zone="foundation" data-suit="clubs" title="Fundación Tréboles (A -> K)">
+            <span class="text-slate-100/35 text-2xl font-serif pointer-events-none">♣</span>
+          </div>
+          <div class="slot-box foundation-slot" data-drop-zone="foundation" data-suit="spades" title="Fundación Picas (A -> K)">
+            <span class="text-slate-100/35 text-2xl font-serif pointer-events-none">♠</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Divisor sutil -->
+    <div class="w-full max-w-5xl h-px bg-gradient-to-r from-transparent via-emerald-500/40 to-transparent"></div>
+
+    <!-- Fila Inferior: 8 Columnas del Tableau -->
+    <div id="tableau-container" class="w-full max-w-5xl flex justify-between gap-1 sm:gap-2 pb-20">
+      <div class="cascade-column" data-drop-zone="cascade" data-col="0"></div>
+      <div class="cascade-column" data-drop-zone="cascade" data-col="1"></div>
+      <div class="cascade-column" data-drop-zone="cascade" data-col="2"></div>
+      <div class="cascade-column" data-drop-zone="cascade" data-col="3"></div>
+      <div class="cascade-column" data-drop-zone="cascade" data-col="4"></div>
+      <div class="cascade-column" data-drop-zone="cascade" data-col="5"></div>
+      <div class="cascade-column" data-drop-zone="cascade" data-col="6"></div>
+      <div class="cascade-column" data-drop-zone="cascade" data-col="7"></div>
+    </div>
+
+  </main>
+
+  <!-- ================= CANVAS PARA ANIMACIÓN DE VICTORIA ================= -->
+  <canvas id="victory-canvas"></canvas>
+
+  <!-- ================= BOTÓN FLOTANTE PARA RESTAURAR MODAL DE VICTORIA ================= -->
+  <button id="btn-reopen-victory" class="fixed bottom-5 right-5 z-[60] bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2.5 rounded-full shadow-2xl border-2 border-white flex items-center gap-2 hidden transition active:scale-95 cursor-pointer">
+    <span>🏆</span>
+    <span>Ver Resumen de Victoria</span>
+  </button>
+
+  <!-- ================= MODAL DE VICTORIA (Z-INDEX: 100000) ================= -->
+  <div id="victory-modal" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-[100000] flex items-center justify-center p-4 hidden">
+    <div class="bg-gradient-to-b from-slate-900 to-emerald-950 border-2 border-amber-400 rounded-2xl max-w-md w-full p-6 text-center shadow-2xl relative transform transition-all duration-300 scale-95">
+      <div class="text-5xl mb-2 animate-bounce">👑</div>
+      <h2 class="text-2xl sm:text-3xl font-extrabold text-amber-300 font-serif tracking-wider mb-1">¡PARTIDA GANADA!</h2>
+      <p class="text-emerald-200 text-xs sm:text-sm mb-5">Has completado con éxito las cuatro fundaciones de la baraja.</p>
+
+      <div class="grid grid-cols-2 gap-3 bg-black/60 p-4 rounded-xl border border-emerald-800/80 mb-5">
+        <div class="flex flex-col">
+          <span class="text-xs text-slate-400 font-medium">Movimientos</span>
+          <span id="win-moves" class="text-xl font-bold text-amber-400 font-mono">0</span>
+        </div>
+        <div class="flex flex-col">
+          <span class="text-xs text-slate-400 font-medium">Tiempo</span>
+          <span id="win-time" class="text-xl font-bold text-emerald-300 font-mono">00:00</span>
+        </div>
+      </div>
+
+      <!-- Selector de dificultad para siguiente partida -->
+      <div class="mb-5 text-left bg-slate-900/90 p-3 rounded-lg border border-slate-700">
+        <label for="modal-diff-select" class="block text-xs text-slate-300 mb-1 font-semibold">Siguiente Dificultad:</label>
+        <select id="modal-diff-select" class="w-full bg-slate-800 text-emerald-300 border border-emerald-600/50 rounded-lg px-2.5 py-1.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-400">
+          <option value="easy">Fácil (6 Celdas Libres)</option>
+          <option value="normal">Normal (4 Celdas Libres)</option>
+          <option value="hard">Difícil (3 Celdas Libres)</option>
+          <option value="expert">Experto (2 Celdas Libres)</option>
+        </select>
+      </div>
+
+      <div class="flex flex-col gap-2">
+        <button id="modal-btn-replay" class="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow-lg transition active:scale-95 text-sm flex items-center justify-center gap-2 cursor-pointer">
+          <span>✨</span> ¡Jugar de nuevo!
+        </button>
+
+        <div class="flex gap-2">
+          <button id="modal-btn-restart-deal" class="flex-1 py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold rounded-xl border border-slate-700 transition active:scale-95 text-xs">
+            🔄 Repetir reparto
+          </button>
+          <button id="modal-btn-view-board" class="flex-1 py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl border border-slate-700 transition active:scale-95 text-xs">
+            👀 Ver Tablero
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MODAL DE CONFIRMACIÓN ================= -->
+  <div id="confirm-modal" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-[100000] flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-700 rounded-xl max-w-sm w-full p-5 shadow-2xl text-center">
+      <div class="text-3xl mb-2">⚠️</div>
+      <h3 id="confirm-title" class="text-base font-bold text-white mb-1.5">¿Estás seguro?</h3>
+      <p id="confirm-desc" class="text-xs text-slate-300 mb-4">El progreso actual de la partida se perderá.</p>
+      <div class="flex gap-2">
+        <button id="confirm-btn-cancel" class="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold cursor-pointer">Cancelar</button>
+        <button id="confirm-btn-ok" class="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold cursor-pointer">Aceptar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= JAVASCRIPT: MOTOR COMPLETO DE CARTA BLANCA ================= -->
+  <script>
+    /* ==========================================================
+       1. EFECTOS DE SONIDO SINTETIZADOS (Web Audio API)
+       ========================================================== */
+    class AudioEngine {
+      constructor() {
+        this.ctx = null;
+        this.muted = false;
+      }
+
+      init() {
+        if (!this.ctx) {
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          if (AudioContext) this.ctx = new AudioContext();
+        }
+        if (this.ctx && this.ctx.state === 'suspended') {
+          this.ctx.resume();
+        }
+      }
+
+      playPick() {
+        if (this.muted) return;
+        this.init();
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(320, now);
+        osc.frequency.exponentialRampToValueAtTime(160, now + 0.05);
+        gain.gain.setValueAtTime(0.12, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.05);
+      }
+
+      playSwoosh() {
+        if (this.muted) return;
+        this.init();
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        const filter = this.ctx.createBiquadFilter();
+
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(420, now);
+        osc.frequency.exponentialRampToValueAtTime(180, now + 0.18);
+
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(800, now);
+        filter.frequency.exponentialRampToValueAtTime(300, now + 0.18);
+
+        gain.gain.setValueAtTime(0.09, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+
+        osc.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.18);
+      }
+
+      playDrop() {
+        if (this.muted) return;
+        this.init();
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(260, now);
+        osc.frequency.exponentialRampToValueAtTime(90, now + 0.08);
+        gain.gain.setValueAtTime(0.18, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.08);
+      }
+
+      playFoundation() {
+        if (this.muted) return;
+        this.init();
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(523.25, now);
+        osc.frequency.setValueAtTime(659.25, now + 0.06);
+        gain.gain.setValueAtTime(0.22, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.2);
+      }
+
+      playError() {
+        if (this.muted) return;
+        this.init();
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(140, now);
+        osc.frequency.linearRampToValueAtTime(100, now + 0.15);
+        gain.gain.setValueAtTime(0.15, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.15);
+      }
+
+      playFanfare() {
+        if (this.muted) return;
+        this.init();
+        if (!this.ctx) return;
+        const notes = [261.63, 329.63, 392.00, 523.25, 659.25, 783.99, 1046.50];
+        notes.forEach((freq, idx) => {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          const startTime = this.ctx.currentTime + (idx * 0.11);
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(freq, startTime);
+          gain.gain.setValueAtTime(0.22, startTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.35);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(startTime);
+          osc.stop(startTime + 0.35);
+        });
+      }
+    }
+
+    const sound = new AudioEngine();
+
+    /* ==========================================================
+       2. DEFINICIÓN DE NAIPES Y CONFIGURACIÓN
+       ========================================================== */
+    const SUITS = [
+      { id: 'hearts', symbol: '♥', color: 'red' },
+      { id: 'diamonds', symbol: '♦', color: 'red' },
+      { id: 'clubs', symbol: '♣', color: 'black' },
+      { id: 'spades', symbol: '♠', color: 'black' }
+    ];
+
+    const RANKS = [
+      { val: 1, label: 'A' },
+      { val: 2, label: '2' },
+      { val: 3, label: '3' },
+      { val: 4, label: '4' },
+      { val: 5, label: '5' },
+      { val: 6, label: '6' },
+      { val: 7, label: '7' },
+      { val: 8, label: '8' },
+      { val: 9, label: '9' },
+      { val: 10, label: '10' },
+      { val: 11, label: 'J' },
+      { val: 12, label: 'Q' },
+      { val: 13, label: 'K' }
+    ];
+
+    const DIFFICULTIES = {
+      easy: { freeCells: 6, label: 'Fácil (6 Celdas)' },
+      normal: { freeCells: 4, label: 'Normal (4 Celdas)' },
+      hard: { freeCells: 3, label: 'Difícil (3 Celdas)' },
+      expert: { freeCells: 2, label: 'Experto (2 Celdas)' }
+    };
+
+    /* ==========================================================
+       3. ESTADO GLOBAL DE LA PARTIDA
+       ========================================================== */
+    const state = {
+      difficulty: 'normal',
+      freeCellsCount: 4,
+      freeCells: [],
+      foundations: { hearts: [], diamonds: [], clubs: [], spades: [] },
+      cascades: [[], [], [], [], [], [], [], []],
+      seed: 0,
+      moves: 0,
+      seconds: 0,
+      timerId: null,
+      isWon: false,
+      isAnimating: false,
+      history: []
+    };
+
+    /* ==========================================================
+       4. GENERADOR Y BARAJAJE DETERMINISTA (ESTILO MICROSOFT)
+       ========================================================== */
+    function buildFullDeck() {
+      const deck = [];
+      SUITS.forEach(suit => {
+        RANKS.forEach(rank => {
+          deck.push({
+            suit: suit.id,
+            symbol: suit.symbol,
+            color: suit.color,
+            val: rank.val,
+            label: rank.label,
+            id: `${suit.id}-${rank.val}`
+          });
+        });
+      });
+      return deck;
+    }
+
+    function shuffleMicrosoft(seed) {
+      const deck = buildFullDeck();
+      let s = seed;
+      function nextRand() {
+        s = (s * 214013 + 2531011) & 0x7FFFFFFF;
+        return (s >> 16) & 0x7FFF;
+      }
+      for (let i = deck.length - 1; i > 0; i--) {
+        const j = nextRand() % (i + 1);
+        const temp = deck[i];
+        deck[i] = deck[j];
+        deck[j] = temp;
+      }
+      return deck;
+    }
+
+    function initGame(seed = null) {
+      stopTimer();
+      stopVictoryAnimation();
+      hideVictoryModal();
+      document.getElementById('btn-reopen-victory').classList.add('hidden');
+
+      const config = DIFFICULTIES[state.difficulty] || DIFFICULTIES.normal;
+      state.freeCellsCount = config.freeCells;
+      state.freeCells = new Array(state.freeCellsCount).fill(null);
+
+      state.foundations = { hearts: [], diamonds: [], clubs: [], spades: [] };
+      state.cascades = [[], [], [], [], [], [], [], []];
+      state.history = [];
+      state.moves = 0;
+      state.seconds = 0;
+      state.isWon = false;
+      state.isAnimating = false;
+
+      state.seed = (seed === null) ? Math.floor(Math.random() * 899999) + 100000 : seed;
+      document.getElementById('deal-seed-display').textContent = state.seed;
+
+      const deck = shuffleMicrosoft(state.seed);
+      let col = 0;
+      deck.forEach(card => {
+        state.cascades[col].push(card);
+        col = (col + 1) % 8;
+      });
+
+      renderSlotsStructure();
+      renderBoard();
+      updateCounters();
+      startTimer();
+      showToast(`Partida #${state.seed} iniciada`);
+    }
+
+    /* ==========================================================
+       5. REGLAS ESTRICTAS DE VALIDACIÓN Y MOVIMIENTO EN BLOQUE
+       ========================================================== */
+    function getEmptyFreeCellsCount() {
+      return state.freeCells.filter(c => c === null).length;
+    }
+
+    function getEmptyCascadesCount(excludeColIdx = -1) {
+      return state.cascades.filter((c, idx) => c.length === 0 && idx !== excludeColIdx).length;
+    }
+
+    /**
+     * Valida si una carta en columna de tableau puede moverse:
+     * Toda la subsecuencia desde ella hasta el final de la columna DEBE ser estrictamente
+     * descendente y de colores alternados.
+     */
+    function isMovableCascadeCard(colIdx, cardIdx) {
+      const col = state.cascades[colIdx];
+      if (!col || cardIdx < 0 || cardIdx >= col.length) return false;
+      if (cardIdx === col.length - 1) return true;
+
+      for (let i = cardIdx; i < col.length - 1; i++) {
+        const curr = col[i];
+        const next = col[i + 1];
+        if (curr.color === next.color) return false;
+        if (curr.val !== next.val + 1) return false;
+      }
+      return true;
+    }
+
+    /**
+     * Límite oficial de movimiento en bloque:
+     * Capacidad = (1 + CeldasLibres) * 2^(ColumnasVacías)
+     * Si el destino es una columna vacía, dicha columna no actúa como búfer intermedio.
+     */
+    function getMaxMovableCards(targetIsCascade, targetIsEmpty, targetColIdx = -1) {
+      const F = getEmptyFreeCellsCount();
+      let C = getEmptyCascadesCount(targetIsCascade && targetIsEmpty ? targetColIdx : -1);
+      return (1 + F) * Math.pow(2, C);
+    }
+
+    function canDropOnFoundation(card, suit) {
+      if (!card || card.suit !== suit) return false;
+      const pile = state.foundations[suit];
+      if (pile.length === 0) {
+        return card.val === 1; // As
+      }
+      const top = pile[pile.length - 1];
+      return card.val === top.val + 1;
+    }
+
+    function canDropOnCascade(movingCards, targetColIdx) {
+      if (!movingCards || movingCards.length === 0) return { valid: false };
+      const targetCol = state.cascades[targetColIdx];
+      const isTargetEmpty = targetCol.length === 0;
+
+      // 1. Validar límite de cartas en bloque
+      const maxAllowed = getMaxMovableCards(true, isTargetEmpty, targetColIdx);
+      if (movingCards.length > maxAllowed) {
+        return { valid: false, reason: `Límite excedido. Capacidad actual: máx. ${maxAllowed} carta(s).` };
+      }
+
+      // 2. Columna vacía acepta secuencia válida
+      if (isTargetEmpty) return { valid: true };
+
+      // 3. Columna con cartas: alternancia de color y valor consecutivo descendente
+      const topCard = targetCol[targetCol.length - 1];
+      const bottomMoving = movingCards[0];
+      if (topCard.color !== bottomMoving.color && topCard.val === bottomMoving.val + 1) {
+        return { valid: true };
+      }
+
+      return { valid: false, reason: `Movimiento inválido. Debe apoyarse sobre ${bottomMoving.val + 1} de color opuesto.` };
+    }
+
+    /* ==========================================================
+       6. HISTORIAL Y DESHACER (UNDO)
+       ========================================================== */
+    function recordState() {
+      state.history.push({
+        freeCells: state.freeCells.map(c => c ? { ...c } : null),
+        foundations: {
+          hearts: [...state.foundations.hearts],
+          diamonds: [...state.foundations.diamonds],
+          clubs: [...state.foundations.clubs],
+          spades: [...state.foundations.spades]
+        },
+        cascades: state.cascades.map(col => [...col])
+      });
+      document.getElementById('btn-undo').disabled = false;
+    }
+
+    function undoMove() {
+      if (state.history.length === 0 || state.isWon || state.isAnimating) return;
+      const prev = state.history.pop();
+      state.freeCells = prev.freeCells;
+      state.foundations = prev.foundations;
+      state.cascades = prev.cascades;
+      state.moves++;
+      clearSelection();
+      clearHints();
+      updateCounters();
+      renderBoard();
+      document.getElementById('btn-undo').disabled = state.history.length === 0;
+      sound.playDrop();
+      showToast('Movimiento deshecho');
+    }
+
+    /* ==========================================================
+       7. CÁLCULO DE COORDENADAS Y ANIMACIÓN DE VUELO (FLY ANIMATION)
+       ========================================================== */
+    function getOverlapPx() {
+      return parseInt(getComputedStyle(document.documentElement).getPropertyValue('--card-overlap')) || 26;
+    }
+
+    function getTargetRect(target) {
+      if (target.type === 'freecell') {
+        const slot = document.querySelector(`[data-drop-zone="freecell"][data-slot-idx="${target.idx}"]`);
+        return slot ? slot.getBoundingClientRect() : null;
+      } else if (target.type === 'foundation') {
+        const slot = document.querySelector(`[data-drop-zone="foundation"][data-suit="${target.suit}"]`);
+        return slot ? slot.getBoundingClientRect() : null;
+      } else if (target.type === 'cascade') {
+        const colEl = document.querySelector(`.cascade-column[data-col="${target.colIdx}"]`);
+        if (!colEl) return null;
+        const colRect = colEl.getBoundingClientRect();
+        const cardCount = state.cascades[target.colIdx].length;
+        const overlap = getOverlapPx();
+        return {
+          left: colRect.left,
+          top: colRect.top + (cardCount * overlap),
+          width: colRect.width,
+          height: colRect.width * 1.42
+        };
+      }
+      return null;
+    }
+
+    /**
+     * Aplica la mutación en el modelo de datos sin animaciones adicionales.
+     */
+    function applyMoveToState(source, target) {
+      recordState();
+      let movingCards = [];
+
+      if (source.type === 'freecell') {
+        movingCards = [state.freeCells[source.idx]];
+        state.freeCells[source.idx] = null;
+      } else if (source.type === 'cascade') {
+        const col = state.cascades[source.colIdx];
+        movingCards = col.splice(source.cardIdx);
+      }
+
+      if (target.type === 'freecell') {
+        state.freeCells[target.idx] = movingCards[0];
+      } else if (target.type === 'foundation') {
+        state.foundations[target.suit].push(movingCards[0]);
+      } else if (target.type === 'cascade') {
+        state.cascades[target.colIdx].push(...movingCards);
+      }
+
+      state.moves++;
+      updateCounters();
+    }
+
+    /**
+     * Ejecuta un movimiento con animación de vuelo suave (Fly Animation).
+     */
+    function animateAndExecuteMove(source, target, onComplete = null) {
+      if (state.isAnimating) return;
+
+      const targetRect = getTargetRect(target);
+      if (!targetRect) {
+        applyMoveToState(source, target);
+        renderBoard();
+        if (onComplete) onComplete();
+        return;
+      }
+
+      // Obtener cartas que van a volar y sus elementos DOM
+      let movingCards = [];
+      let sourceElements = [];
+
+      if (source.type === 'freecell') {
+        const c = state.freeCells[source.idx];
+        if (!c) return;
+        movingCards = [c];
+        const el = document.querySelector(`[data-card-id="${c.id}"]`);
+        if (el) sourceElements.push(el);
+      } else if (source.type === 'cascade') {
+        const col = state.cascades[source.colIdx];
+        movingCards = col.slice(source.cardIdx);
+        for (let i = source.cardIdx; i < col.length; i++) {
+          const el = document.querySelector(`[data-card-id="${col[i].id}"]`);
+          if (el) sourceElements.push(el);
+        }
+      }
+
+      if (movingCards.length === 0 || sourceElements.length === 0) {
+        applyMoveToState(source, target);
+        renderBoard();
+        if (onComplete) onComplete();
+        return;
+      }
+
+      const startRect = sourceElements[0].getBoundingClientRect();
+      const deltaX = targetRect.left - startRect.left;
+      const deltaY = targetRect.top - startRect.top;
+
+      state.isAnimating = true;
+      clearSelection();
+      clearHints();
+
+      // Crear contenedor fantasma para el vuelo
+      const ghost = document.createElement('div');
+      ghost.className = 'flying-card-ghost';
+      ghost.style.left = `${startRect.left}px`;
+      ghost.style.top = `${startRect.top}px`;
+      ghost.style.width = `${startRect.width}px`;
+      ghost.style.height = `${startRect.height}px`;
+
+      const overlap = getOverlapPx();
+      movingCards.forEach((c, idx) => {
+        const cardClone = buildCardElement(c, null, false);
+        cardClone.style.top = `${idx * overlap}px`;
+        cardClone.style.left = '0';
+        cardClone.style.boxShadow = '0 18px 36px rgba(0,0,0,0.55), 0 6px 14px rgba(0,0,0,0.3)';
+        ghost.appendChild(cardClone);
+      });
+
+      document.body.appendChild(ghost);
+
+      // Ocultar suavemente la carta original en su origen
+      sourceElements.forEach(el => el.classList.add('card-hidden-source'));
+      sound.playSwoosh();
+
+      // Disparar traslación CSS en el siguiente fotograma
+      requestAnimationFrame(() => {
+        ghost.style.transform = `translate3d(${deltaX}px, ${deltaY}px, 0) scale(1.02)`;
+      });
+
+      // Al completar el vuelo
+      const cleanupFlight = () => {
+        if (!state.isAnimating) return;
+        if (ghost && ghost.parentNode) {
+          ghost.parentNode.removeChild(ghost);
+        }
+
+        applyMoveToState(source, target);
+
+        if (target.type === 'foundation') {
+          sound.playFoundation();
+        } else {
+          sound.playDrop();
+        }
+
+        renderBoard();
+        state.isAnimating = false;
+        checkWinCondition();
+
+        if (onComplete) onComplete();
+      };
+
+      ghost.addEventListener('transitionend', cleanupFlight, { once: true });
+      // Salvaguarda temporal por si el transitionend no se dispara
+      setTimeout(cleanupFlight, 260);
+    }
+
+    /* ==========================================================
+       8. DOBLE CLIC / AUTO-COLOCAR Y AUTO-COMPLETAR
+       ========================================================== */
+    function tryQuickMove(source) {
+      if (state.isAnimating || state.isWon) return;
+
+      let cards = [];
+      if (source.type === 'freecell') {
+        const c = state.freeCells[source.idx];
+        if (c) cards = [c];
+      } else if (source.type === 'cascade') {
+        const col = state.cascades[source.colIdx];
+        cards = col.slice(source.cardIdx);
+      }
+      if (cards.length === 0) return;
+
+      // 1. Enviar a Fundación si es una sola carta
+      if (cards.length === 1 && canDropOnFoundation(cards[0], cards[0].suit)) {
+        animateAndExecuteMove(source, { type: 'foundation', suit: cards[0].suit });
+        return;
+      }
+
+      // 2. Enviar a otra columna de tableau no vacía
+      for (let c = 0; c < 8; c++) {
+        if (source.type === 'cascade' && source.colIdx === c) continue;
+        if (state.cascades[c].length > 0) {
+          const res = canDropOnCascade(cards, c);
+          if (res.valid) {
+            animateAndExecuteMove(source, { type: 'cascade', colIdx: c });
+            return;
+          }
+        }
+      }
+
+      // 3. Si es una sola carta de tableau, enviar a celda libre disponible
+      if (cards.length === 1 && source.type === 'cascade') {
+        const freeIdx = state.freeCells.findIndex(cell => cell === null);
+        if (freeIdx !== -1) {
+          animateAndExecuteMove(source, { type: 'freecell', idx: freeIdx });
+          return;
+        }
+      }
+
+      // 4. Enviar a columna de tableau vacía
+      for (let c = 0; c < 8; c++) {
+        if (source.type === 'cascade' && source.colIdx === c) continue;
+        if (state.cascades[c].length === 0) {
+          const res = canDropOnCascade(cards, c);
+          if (res.valid) {
+            animateAndExecuteMove(source, { type: 'cascade', colIdx: c });
+            return;
+          }
+        }
+      }
+
+      sound.playError();
+      showToast('No hay destino disponible para esta carta');
+    }
+
+    function autoPlayToFoundations() {
+      if (state.isWon || state.isAnimating) return;
+
+      // 1. Buscar en celdas libres
+      for (let i = 0; i < state.freeCells.length; i++) {
+        const c = state.freeCells[i];
+        if (c && canDropOnFoundation(c, c.suit)) {
+          animateAndExecuteMove({ type: 'freecell', idx: i }, { type: 'foundation', suit: c.suit }, () => {
+            setTimeout(autoPlayToFoundations, 40);
+          });
+          return;
+        }
+      }
+
+      // 2. Buscar en el final de las columnas del tableau
+      for (let c = 0; c < 8; c++) {
+        const col = state.cascades[c];
+        if (col.length > 0) {
+          const card = col[col.length - 1];
+          if (canDropOnFoundation(card, card.suit)) {
+            animateAndExecuteMove({ type: 'cascade', colIdx: c, cardIdx: col.length - 1 }, { type: 'foundation', suit: card.suit }, () => {
+              setTimeout(autoPlayToFoundations, 40);
+            });
+            return;
+          }
+        }
+      }
+
+      showToast('No hay más cartas automáticas para fundaciones');
+    }
+
+    /* ==========================================================
+       9. PISTAS INTELIGENTES (HINTS)
+       ========================================================== */
+    function showHint() {
+      if (state.isAnimating || state.isWon) return;
+      clearHints();
+
+      // 1. Sugerencias a fundaciones
+      for (let i = 0; i < state.freeCells.length; i++) {
+        const c = state.freeCells[i];
+        if (c && canDropOnFoundation(c, c.suit)) {
+          highlightHint(`[data-card-id="${c.id}"]`, `[data-suit="${c.suit}"]`, `Sube ${c.label}${c.symbol} a la fundación`);
+          return;
+        }
+      }
+      for (let c = 0; c < 8; c++) {
+        const col = state.cascades[c];
+        if (col.length > 0) {
+          const card = col[col.length - 1];
+          if (canDropOnFoundation(card, card.suit)) {
+            highlightHint(`[data-card-id="${card.id}"]`, `[data-suit="${card.suit}"]`, `Sube ${card.label}${card.symbol} a la fundación`);
+            return;
+          }
+        }
+      }
+
+      // 2. Sugerencias entre columnas de tableau
+      for (let srcCol = 0; srcCol < 8; srcCol++) {
+        const col = state.cascades[srcCol];
+        if (col.length === 0) continue;
+        for (let idx = 0; idx < col.length; idx++) {
+          if (isMovableCascadeCard(srcCol, idx)) {
+            const subSeq = col.slice(idx);
+            for (let dstCol = 0; dstCol < 8; dstCol++) {
+              if (srcCol === dstCol) continue;
+              const dst = state.cascades[dstCol];
+              if (idx === 0 && dst.length === 0) continue;
+              const check = canDropOnCascade(subSeq, dstCol);
+              if (check.valid) {
+                const targetCard = dst.length > 0 ? dst[dst.length - 1] : null;
+                const tgtSel = targetCard ? `[data-card-id="${targetCard.id}"]` : `.cascade-column[data-col="${dstCol}"]`;
+                highlightHint(`[data-card-id="${subSeq[0].id}"]`, tgtSel, `Mueve ${subSeq[0].label}${subSeq[0].symbol} a la columna ${dstCol + 1}`);
+                return;
+              }
+            }
+          }
+        }
+      }
+
+      // 3. De celda libre a columna
+      for (let i = 0; i < state.freeCells.length; i++) {
+        const c = state.freeCells[i];
+        if (!c) continue;
+        for (let dstCol = 0; dstCol < 8; dstCol++) {
+          const check = canDropOnCascade([c], dstCol);
+          if (check.valid) {
+            highlightHint(`[data-card-id="${c.id}"]`, `.cascade-column[data-col="${dstCol}"]`, `Mueve ${c.label}${c.symbol} a la columna ${dstCol + 1}`);
+            return;
+          }
+        }
+      }
+
+      showToast('No se detectaron movimientos evidentes');
+    }
+
+    function highlightHint(srcSelector, dstSelector, msg) {
+      const src = document.querySelector(srcSelector);
+      const dst = document.querySelector(dstSelector);
+      if (src) src.classList.add('card-hint-src');
+      if (dst) dst.classList.add('card-hint-dst');
+      sound.playPick();
+      showToast(msg);
+    }
+
+    function clearHints() {
+      document.querySelectorAll('.card-hint-src').forEach(el => el.classList.remove('card-hint-src'));
+      document.querySelectorAll('.card-hint-dst').forEach(el => el.classList.remove('card-hint-dst'));
+    }
+
+    /* ==========================================================
+       10. TEMPORIZADOR Y CONTADORES
+       ========================================================== */
+    function startTimer() {
+      stopTimer();
+      state.timerId = setInterval(() => {
+        state.seconds++;
+        updateCounters();
+      }, 1000);
+    }
+
+    function stopTimer() {
+      if (state.timerId) {
+        clearInterval(state.timerId);
+        state.timerId = null;
+      }
+    }
+
+    function updateCounters() {
+      document.getElementById('move-counter').textContent = state.moves;
+      const mins = Math.floor(state.seconds / 60).toString().padStart(2, '0');
+      const secs = (state.seconds % 60).toString().padStart(2, '0');
+      document.getElementById('timer-display').textContent = `${mins}:${secs}`;
+    }
+
+    /* ==========================================================
+       11. PANTALLA Y ANIMACIÓN DE VICTORIA SEGURA
+       ========================================================== */
+    function checkWinCondition() {
+      const total = state.foundations.hearts.length +
+                    state.foundations.diamonds.length +
+                    state.foundations.clubs.length +
+                    state.foundations.spades.length;
+
+      if (total === 52 && !state.isWon) {
+        state.isWon = true;
+        stopTimer();
+        sound.playFanfare();
+
+        document.getElementById('win-moves').textContent = state.moves;
+        const mins = Math.floor(state.seconds / 60).toString().padStart(2, '0');
+        const secs = (state.seconds % 60).toString().padStart(2, '0');
+        document.getElementById('win-time').textContent = `${mins}:${secs}`;
+        document.getElementById('modal-diff-select').value = state.difficulty;
+
+        startVictoryAnimation();
+        setTimeout(showVictoryModal, 500);
+      }
+    }
+
+    let victoryAnimId = null;
+
+    function startVictoryAnimation() {
+      const canvas = document.getElementById('victory-canvas');
+      canvas.style.display = 'block';
+      const ctx = canvas.getContext('2d');
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+
+      const particles = [];
+      const suits = ['♥', '♦', '♣', '♠'];
+      const colors = ['#e11d48', '#e11d48', '#0f172a', '#0f172a'];
+
+      for (let i = 0; i < 52; i++) {
+        const suitIdx = i % 4;
+        particles.push({
+          x: canvas.width * 0.72 + (suitIdx * 18),
+          y: 70,
+          vx: (Math.random() - 0.5) * 8 - 2.5,
+          vy: Math.random() * -3 - 2,
+          gravity: 0.35,
+          bounce: 0.78,
+          rank: RANKS[i % 13].label,
+          suit: suits[suitIdx],
+          color: colors[suitIdx],
+          active: i === 0,
+          frameDelay: i * 7
+        });
+      }
+
+      let frame = 0;
+      function loop() {
+        frame++;
+        particles.forEach(p => {
+          if (!p.active && frame >= p.frameDelay) p.active = true;
+        });
+
+        particles.forEach(p => {
+          if (!p.active) return;
+          const w = 54;
+          const h = 76;
+
+          ctx.fillStyle = '#ffffff';
+          ctx.strokeStyle = '#94a3b8';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.roundRect(p.x, p.y, w, h, 6);
+          ctx.fill();
+          ctx.stroke();
+
+          ctx.fillStyle = p.color;
+          ctx.font = 'bold 12px sans-serif';
+          ctx.fillText(`${p.rank}${p.suit}`, p.x + 5, p.y + 16);
+
+          p.x += p.vx;
+          p.y += p.vy;
+          p.vy += p.gravity;
+
+          if (p.y + h > canvas.height) {
+            p.y = canvas.height - h;
+            p.vy = -p.vy * p.bounce;
+          }
+          if (p.x + w < 0 || p.x > canvas.width) {
+            p.x = canvas.width * 0.72;
+            p.y = 70;
+            p.vx = (Math.random() - 0.5) * 9 - 2;
+            p.vy = Math.random() * -4;
+          }
+        });
+
+        victoryAnimId = requestAnimationFrame(loop);
+      }
+      loop();
+    }
+
+    function stopVictoryAnimation() {
+      if (victoryAnimId) {
+        cancelAnimationFrame(victoryAnimId);
+        victoryAnimId = null;
+      }
+      const canvas = document.getElementById('victory-canvas');
+      canvas.style.display = 'none';
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    function showVictoryModal() {
+      const modal = document.getElementById('victory-modal');
+      modal.classList.remove('hidden');
+      setTimeout(() => {
+        modal.querySelector('div').classList.remove('scale-95');
+        modal.querySelector('div').classList.add('scale-100');
+      }, 20);
+    }
+
+    function hideVictoryModal() {
+      const modal = document.getElementById('victory-modal');
+      modal.classList.add('hidden');
+      const box = modal.querySelector('div');
+      box.classList.remove('scale-100');
+      box.classList.add('scale-95');
+    }
+
+    /* ==========================================================
+       12. RENDERIZADO DEL TABLERO Y DOM
+       ========================================================== */
+    function renderSlotsStructure() {
+      const container = document.getElementById('free-cells-container');
+      container.innerHTML = '';
+      document.getElementById('freecells-count-badge').textContent = state.freeCellsCount;
+
+      for (let i = 0; i < state.freeCellsCount; i++) {
+        const slot = document.createElement('div');
+        slot.className = 'slot-box freecell-slot';
+        slot.dataset.dropZone = 'freecell';
+        slot.dataset.slotIdx = i;
+        slot.title = `Celda Libre ${i + 1}`;
+
+        slot.addEventListener('click', () => {
+          if (selectedSequence && !state.isAnimating) {
+            if (state.freeCells[i] === null && selectedSequence.cards.length === 1) {
+              animateAndExecuteMove(selectedSequence.source, { type: 'freecell', idx: i });
+              return;
+            } else if (selectedSequence.cards.length > 1) {
+              sound.playError();
+              showToast('Solo puedes colocar 1 carta por celda libre');
+            }
+          }
+          clearSelection();
+        });
+
+        container.appendChild(slot);
+      }
+
+      document.querySelectorAll('.foundation-slot').forEach(slot => {
+        slot.onclick = () => {
+          if (selectedSequence && !state.isAnimating) {
+            const suit = slot.dataset.suit;
+            if (selectedSequence.cards.length === 1 && canDropOnFoundation(selectedSequence.cards[0], suit)) {
+              animateAndExecuteMove(selectedSequence.source, { type: 'foundation', suit: suit });
+              return;
+            } else {
+              sound.playError();
+            }
+          }
+          clearSelection();
+        };
+      });
+
+      document.querySelectorAll('.cascade-column').forEach(colEl => {
+        colEl.onclick = (e) => {
+          if (e.target.closest('.card')) return;
+          const colIdx = parseInt(colEl.dataset.col);
+          if (selectedSequence && !state.isAnimating) {
+            const res = canDropOnCascade(selectedSequence.cards, colIdx);
+            if (res.valid) {
+              animateAndExecuteMove(selectedSequence.source, { type: 'cascade', colIdx: colIdx });
+              return;
+            } else {
+              sound.playError();
+              if (res.reason) showToast(res.reason);
+            }
+          }
+          clearSelection();
+        };
+      });
+    }
+
+    function renderBoard() {
+      // 1. Celdas Libres
+      for (let i = 0; i < state.freeCellsCount; i++) {
+        const slot = document.querySelector(`[data-drop-zone="freecell"][data-slot-idx="${i}"]`);
+        if (!slot) continue;
+        slot.innerHTML = '';
+        const card = state.freeCells[i];
+        if (card) {
+          slot.appendChild(buildCardElement(card, { type: 'freecell', idx: i }, true));
+        }
+      }
+
+      // 2. Fundaciones
+      SUITS.forEach(suit => {
+        const slot = document.querySelector(`[data-drop-zone="foundation"][data-suit="${suit.id}"]`);
+        if (!slot) return;
+        slot.innerHTML = '';
+        const pile = state.foundations[suit.id];
+        if (pile.length > 0) {
+          const topCard = pile[pile.length - 1];
+          const el = buildCardElement(topCard, { type: 'foundation', suit: suit.id }, false);
+          el.style.cursor = 'default';
+          slot.appendChild(el);
+        } else {
+          slot.innerHTML = `<span class="${suit.color === 'red' ? 'text-red-500/35' : 'text-slate-100/35'} text-2xl font-serif pointer-events-none">${suit.symbol}</span>`;
+        }
+      });
+
+      // 3. Tableau
+      const overlapPx = getOverlapPx();
+
+      for (let c = 0; c < 8; c++) {
+        const colEl = document.querySelector(`.cascade-column[data-col="${c}"]`);
+        colEl.innerHTML = '';
+        const cards = state.cascades[c];
+
+        if (cards.length === 0) {
+          const ghost = document.createElement('div');
+          ghost.className = 'slot-box opacity-20 pointer-events-none';
+          colEl.appendChild(ghost);
+          colEl.style.minHeight = 'var(--card-h)';
+          continue;
+        }
+
+        cards.forEach((card, idx) => {
+          const isMovable = isMovableCascadeCard(c, idx);
+          const el = buildCardElement(card, { type: 'cascade', colIdx: c, cardIdx: idx }, isMovable);
+          el.style.top = `${idx * overlapPx}px`;
+          el.style.zIndex = idx + 1;
+          colEl.appendChild(el);
+        });
+
+        colEl.style.minHeight = `calc(var(--card-h) + ${(cards.length - 1) * overlapPx}px + 24px)`;
+      }
+    }
+
+    /**
+     * Construye el nodo DOM de una carta:
+     * - Número y símbolo juntos horizontalmente (Side-by-Side) en la esquina superior izquierda.
+     * - Totalmente legible cuando la carta está parcialmente tapada.
+     */
+    function buildCardElement(card, source, isMovable) {
+      const el = document.createElement('div');
+      el.className = `card ${card.color === 'red' ? 'card-red' : 'card-black'} ${isMovable ? 'card-movable' : 'card-blocked'}`;
+      el.dataset.cardId = card.id;
+
+      // Arte o símbolo central
+      const centerDisplay = card.val > 10 
+        ? (card.val === 11 ? '⚔️' : (card.val === 12 ? '👑' : '⚜️')) 
+        : card.symbol;
+
+      el.innerHTML = `
+        <!-- Esquina Superior Izquierda: Número y Símbolo juntos horizontalmente -->
+        <div class="card-index-box pointer-events-none">
+          <span class="card-rank">${card.label}</span>
+          <span class="card-suit">${card.symbol}</span>
+        </div>
+
+        <!-- Arte Central Decorativo -->
+        <div class="card-center-icon pointer-events-none select-none">
+          <span>${centerDisplay}</span>
+        </div>
+
+        <!-- Esquina Inferior Derecha Invertida -->
+        <div class="card-index-box rotate-180 self-end pointer-events-none">
+          <span class="card-rank">${card.label}</span>
+          <span class="card-suit">${card.symbol}</span>
+        </div>
+      `;
+
+      if (source) {
+        // Doble Clic/Tap para Auto-Movimiento con Animación de Vuelo
+        el.addEventListener('dblclick', (e) => {
+          e.stopPropagation();
+          if (state.isAnimating) return;
+          if (!isMovable) {
+            triggerBlockedCard(el);
+            return;
+          }
+          tryQuickMove(source);
+        });
+
+        // Configurar gestor de arrastre y selección
+        setupCardInteraction(el, source, card, isMovable);
+      }
+
+      return el;
+    }
+
+    function triggerBlockedCard(cardEl) {
+      sound.playError();
+      cardEl.classList.remove('card-shake');
+      void cardEl.offsetWidth; // Reflow para reiniciar animación
+      cardEl.classList.add('card-shake');
+      setTimeout(() => cardEl.classList.remove('card-shake'), 360);
+      showToast('Carta bloqueada. Solo puedes mover cartas libres o secuencias ordenadas continuas.');
+    }
+
+    /* ==========================================================
+       13. ARRASTRE SEGURO CON #DRAG-CONTAINER FLOTANTE
+       ========================================================== */
+    let selectedSequence = null;
+
+    function clearSelection() {
+      selectedSequence = null;
+      document.querySelectorAll('.card-selected').forEach(el => el.classList.remove('card-selected'));
+    }
+
+    function findBestDropTarget(pointerX, pointerY) {
+      const hitList = document.elementsFromPoint(pointerX, pointerY);
+      for (const el of hitList) {
+        if (el.closest('#drag-container')) continue;
+
+        const freecell = el.closest('[data-drop-zone="freecell"]');
+        if (freecell) {
+          return { type: 'freecell', idx: parseInt(freecell.dataset.slotIdx) };
+        }
+
+        const foundation = el.closest('[data-drop-zone="foundation"]');
+        if (foundation) {
+          return { type: 'foundation', suit: foundation.dataset.suit };
+        }
+
+        const cascade = el.closest('[data-drop-zone="cascade"]');
+        if (cascade) {
+          return { type: 'cascade', colIdx: parseInt(cascade.dataset.col) };
+        }
+      }
+
+      // Comprobación geométrica por proximidad
+      const zones = document.querySelectorAll('[data-drop-zone]');
+      let closestZone = null;
+      let minDistance = 65;
+
+      zones.forEach(zone => {
+        const rect = zone.getBoundingClientRect();
+        const clampedX = Math.max(rect.left, Math.min(pointerX, rect.right));
+        const clampedY = Math.max(rect.top, Math.min(pointerY, rect.bottom));
+        const dist = Math.hypot(pointerX - clampedX, pointerY - clampedY);
+
+        if (dist < minDistance) {
+          minDistance = dist;
+          closestZone = zone;
+        }
+      });
+
+      if (closestZone) {
+        const zoneType = closestZone.dataset.dropZone;
+        if (zoneType === 'freecell') return { type: 'freecell', idx: parseInt(closestZone.dataset.slotIdx) };
+        if (zoneType === 'foundation') return { type: 'foundation', suit: closestZone.dataset.suit };
+        if (zoneType === 'cascade') return { type: 'cascade', colIdx: parseInt(closestZone.dataset.col) };
+      }
+
+      return null;
+    }
+
+    function setupCardInteraction(cardEl, source, cardData, isMovable) {
+      if (source.type === 'foundation') return;
+
+      let isPointerDown = false;
+      let hasDragged = false;
+      let startX = 0, startY = 0;
+      let grabOffsetX = 0, grabOffsetY = 0;
+      let dragContainer = null;
+      let movingCards = [];
+      let sourceElements = [];
+
+      function onGlobalPointerMove(e) {
+        if (!isPointerDown) return;
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+
+        if (!hasDragged && Math.hypot(dx, dy) > 5) {
+          hasDragged = true;
+          clearHints();
+          clearSelection();
+
+          dragContainer = document.createElement('div');
+          dragContainer.id = 'drag-container';
+          dragContainer.style.cssText = `
+            position: fixed;
+            left: 0;
+            top: 0;
+            pointer-events: none;
+            z-index: 99999;
+            will-change: transform;
+            transform: translate3d(${e.clientX - grabOffsetX}px, ${e.clientY - grabOffsetY}px, 0);
+          `;
+
+          const overlap = getOverlapPx();
+
+          movingCards.forEach((c, idx) => {
+            const clone = buildCardElement(c, null, false);
+            clone.style.position = 'absolute';
+            clone.style.top = `${idx * overlap}px`;
+            clone.style.left = '0';
+            clone.style.boxShadow = '0 16px 32px rgba(0,0,0,0.55), 0 6px 12px rgba(0,0,0,0.3)';
+            dragContainer.appendChild(clone);
+          });
+
+          document.body.appendChild(dragContainer);
+          sourceElements.forEach(el => el.classList.add('card-dragging-source'));
+          sound.playPick();
+        }
+
+        if (hasDragged && dragContainer) {
+          dragContainer.style.transform = `translate3d(${e.clientX - grabOffsetX}px, ${e.clientY - grabOffsetY}px, 0)`;
+
+          document.querySelectorAll('.drag-hover').forEach(el => el.classList.remove('drag-hover'));
+          const target = findBestDropTarget(e.clientX, e.clientY);
+          if (target) {
+            let targetEl = null;
+            if (target.type === 'freecell') targetEl = document.querySelector(`[data-drop-zone="freecell"][data-slot-idx="${target.idx}"]`);
+            else if (target.type === 'foundation') targetEl = document.querySelector(`[data-drop-zone="foundation"][data-suit="${target.suit}"]`);
+            else if (target.type === 'cascade') targetEl = document.querySelector(`.cascade-column[data-col="${target.colIdx}"]`);
+            if (targetEl) targetEl.classList.add('drag-hover');
+          }
+        }
+      }
+
+      function onGlobalPointerUp(e) {
+        if (!isPointerDown) return;
+        isPointerDown = false;
+
+        window.removeEventListener('pointermove', onGlobalPointerMove);
+        window.removeEventListener('pointerup', onGlobalPointerUp);
+        window.removeEventListener('pointercancel', onGlobalPointerCancel);
+
+        document.querySelectorAll('.drag-hover').forEach(el => el.classList.remove('drag-hover'));
+
+        if (!hasDragged) {
+          // Clic deliberado
+          if (dragContainer && dragContainer.parentNode) {
+            dragContainer.parentNode.removeChild(dragContainer);
+          }
+          handleCardClick(source, cardData);
+          return;
+        }
+
+        const dropTarget = findBestDropTarget(e.clientX, e.clientY);
+        let executed = false;
+
+        if (dropTarget) {
+          if (dropTarget.type === 'freecell') {
+            if (movingCards.length === 1 && state.freeCells[dropTarget.idx] === null) {
+              applyMoveToState(source, dropTarget);
+              sound.playDrop();
+              executed = true;
+            } else if (movingCards.length > 1) {
+              showToast('Solo puedes colocar 1 carta por celda libre');
+            }
+          } else if (dropTarget.type === 'foundation') {
+            if (movingCards.length === 1 && canDropOnFoundation(movingCards[0], dropTarget.suit)) {
+              applyMoveToState(source, dropTarget);
+              sound.playFoundation();
+              executed = true;
+            }
+          } else if (dropTarget.type === 'cascade') {
+            if (!(source.type === 'cascade' && source.colIdx === dropTarget.colIdx)) {
+              const check = canDropOnCascade(movingCards, dropTarget.colIdx);
+              if (check.valid) {
+                applyMoveToState(source, dropTarget);
+                sound.playDrop();
+                executed = true;
+              } else if (check.reason) {
+                showToast(check.reason);
+              }
+            }
+          }
+        }
+
+        if (executed) {
+          if (dragContainer && dragContainer.parentNode) {
+            dragContainer.parentNode.removeChild(dragContainer);
+          }
+          renderBoard();
+          checkWinCondition();
+        } else {
+          // Retorno animado limpio al origen: jamás se congela ni queda flotando
+          sound.playError();
+          if (dragContainer) {
+            const originRect = sourceElements[0].getBoundingClientRect();
+            dragContainer.style.transition = 'transform 0.16s ease-out';
+            dragContainer.style.transform = `translate3d(${originRect.left}px, ${originRect.top}px, 0)`;
+            setTimeout(() => {
+              if (dragContainer && dragContainer.parentNode) {
+                dragContainer.parentNode.removeChild(dragContainer);
+              }
+              renderBoard();
+            }, 160);
+          } else {
+            renderBoard();
+          }
+        }
+      }
+
+      function onGlobalPointerCancel() {
+        if (!isPointerDown) return;
+        isPointerDown = false;
+        window.removeEventListener('pointermove', onGlobalPointerMove);
+        window.removeEventListener('pointerup', onGlobalPointerUp);
+        window.removeEventListener('pointercancel', onGlobalPointerCancel);
+
+        document.querySelectorAll('.drag-hover').forEach(el => el.classList.remove('drag-hover'));
+        if (dragContainer && dragContainer.parentNode) {
+          dragContainer.parentNode.removeChild(dragContainer);
+        }
+        renderBoard();
+      }
+
+      cardEl.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0 && e.pointerType === 'mouse') return;
+        if (state.isWon || state.isAnimating) return;
+
+        if (!isMovable) {
+          triggerBlockedCard(cardEl);
+          return;
+        }
+
+        if (source.type === 'cascade') {
+          const col = state.cascades[source.colIdx];
+          movingCards = col.slice(source.cardIdx);
+          sourceElements = [];
+          for (let i = source.cardIdx; i < col.length; i++) {
+            const el = document.querySelector(`[data-card-id="${col[i].id}"]`);
+            if (el) sourceElements.push(el);
+          }
+        } else if (source.type === 'freecell') {
+          movingCards = [cardData];
+          sourceElements = [cardEl];
+        }
+
+        isPointerDown = true;
+        hasDragged = false;
+        startX = e.clientX;
+        startY = e.clientY;
+
+        const rect = cardEl.getBoundingClientRect();
+        grabOffsetX = e.clientX - rect.left;
+        grabOffsetY = e.clientY - rect.top;
+
+        window.addEventListener('pointermove', onGlobalPointerMove, { passive: false });
+        window.addEventListener('pointerup', onGlobalPointerUp);
+        window.addEventListener('pointercancel', onGlobalPointerCancel);
+      });
+    }
+
+    function handleCardClick(source, cardData) {
+      if (state.isAnimating || state.isWon) return;
+      clearHints();
+
+      // Si ya hay una secuencia seleccionada previamente
+      if (selectedSequence) {
+        // Clic en la misma carta: deseleccionar
+        if (selectedSequence.source.type === source.type &&
+            ((source.type === 'freecell' && selectedSequence.source.idx === source.idx) ||
+             (source.type === 'cascade' && selectedSequence.source.colIdx === source.colIdx && selectedSequence.source.cardIdx === source.cardIdx))) {
+          clearSelection();
+          return;
+        }
+
+        // Colocar sobre la carta destino si está en la cima del tableau
+        if (source.type === 'cascade') {
+          const col = state.cascades[source.colIdx];
+          if (source.cardIdx === col.length - 1) {
+            const res = canDropOnCascade(selectedSequence.cards, source.colIdx);
+            if (res.valid) {
+              animateAndExecuteMove(selectedSequence.source, { type: 'cascade', colIdx: source.colIdx });
+              return;
+            } else {
+              sound.playError();
+              if (res.reason) showToast(res.reason);
+            }
+          }
+        }
+
+        clearSelection();
+      }
+
+      // Nueva selección
+      if (source.type === 'freecell') {
+        selectedSequence = { source, cards: [cardData] };
+        const el = document.querySelector(`[data-card-id="${cardData.id}"]`);
+        if (el) el.classList.add('card-selected');
+        sound.playPick();
+      } else if (source.type === 'cascade') {
+        const col = state.cascades[source.colIdx];
+        const subSeq = col.slice(source.cardIdx);
+        selectedSequence = { source, cards: subSeq };
+
+        for (let i = source.cardIdx; i < col.length; i++) {
+          const el = document.querySelector(`[data-card-id="${col[i].id}"]`);
+          if (el) el.classList.add('card-selected');
+        }
+        sound.playPick();
+      }
+    }
+
+    /* ==========================================================
+       14. TOASTS Y MODALES AUXILIARES
+       ========================================================== */
+    let toastTimeout = null;
+    function showToast(msg) {
+      const toast = document.getElementById('toast-msg');
+      toast.textContent = msg;
+      toast.style.opacity = '1';
+      clearTimeout(toastTimeout);
+      toastTimeout = setTimeout(() => {
+        toast.style.opacity = '0';
+      }, 2400);
+    }
+
+    function showConfirm(title, desc, onConfirm) {
+      const modal = document.getElementById('confirm-modal');
+      document.getElementById('confirm-title').textContent = title;
+      document.getElementById('confirm-desc').textContent = desc;
+      modal.classList.remove('hidden');
+
+      const ok = document.getElementById('confirm-btn-ok');
+      const cancel = document.getElementById('confirm-btn-cancel');
+
+      function close() {
+        modal.classList.add('hidden');
+        ok.onclick = null;
+        cancel.onclick = null;
+      }
+
+      ok.onclick = () => { close(); onConfirm(); };
+      cancel.onclick = close;
+    }
+
+    /* ==========================================================
+       15. LISTENERS DE CONTROLES PRINCIPALES
+       ========================================================== */
+    document.getElementById('difficulty-select').addEventListener('change', (e) => {
+      const newDiff = e.target.value;
+      if (newDiff === state.difficulty) return;
+      if (state.moves > 0 && !state.isWon) {
+        showConfirm('Cambiar Dificultad', 'Se reiniciará la mesa con la nueva dificultad elegida.', () => {
+          state.difficulty = newDiff;
+          initGame();
+        });
+        e.target.value = state.difficulty;
+      } else {
+        state.difficulty = newDiff;
+        initGame();
+      }
+    });
+
+    document.getElementById('btn-undo').addEventListener('click', undoMove);
+    document.getElementById('btn-hint').addEventListener('click', showHint);
+    document.getElementById('btn-auto').addEventListener('click', autoPlayToFoundations);
+
+    document.getElementById('btn-audio').addEventListener('click', () => {
+      sound.muted = !sound.muted;
+      document.getElementById('audio-icon').textContent = sound.muted ? '🔇' : '🔊';
+      showToast(sound.muted ? 'Sonido silenciado' : 'Sonido activado');
+    });
+
+    document.getElementById('btn-restart').addEventListener('click', () => {
+      if (state.moves === 0) return;
+      showConfirm('Reiniciar reparto', 'Se restablecerán las cartas a la posición inicial de esta misma partida.', () => {
+        initGame(state.seed);
+      });
+    });
+
+    document.getElementById('btn-new-game').addEventListener('click', () => {
+      if (state.moves > 0 && !state.isWon) {
+        showConfirm('Nueva partida', '¿Deseas abandonar la partida actual y repartir una nueva?', () => {
+          initGame();
+        });
+      } else {
+        initGame();
+      }
+    });
+
+    // Botones del Modal de Victoria
+    document.getElementById('modal-btn-replay').addEventListener('click', () => {
+      const selectedDiff = document.getElementById('modal-diff-select').value;
+      state.difficulty = selectedDiff;
+      document.getElementById('difficulty-select').value = selectedDiff;
+      initGame();
+    });
+
+    document.getElementById('modal-btn-restart-deal').addEventListener('click', () => {
+      initGame(state.seed);
+    });
+
+    document.getElementById('modal-btn-view-board').addEventListener('click', () => {
+      hideVictoryModal();
+      stopVictoryAnimation();
+      document.getElementById('btn-reopen-victory').classList.remove('hidden');
+    });
+
+    document.getElementById('btn-reopen-victory').addEventListener('click', () => {
+      showVictoryModal();
+      document.getElementById('btn-reopen-victory').classList.add('hidden');
+    });
+
+    // Atajos de teclado
+    window.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        undoMove();
+      } else if (e.key.toLowerCase() === 'h') {
+        showHint();
+      } else if (e.key.toLowerCase() === 'n') {
+        initGame();
+      }
+    });
+
+    // Deseleccionar al tocar el tapiz libre
+    document.addEventListener('pointerdown', (e) => {
+      if (!e.target.closest('.card') && !e.target.closest('.slot-box') && !e.target.closest('header')) {
+        clearSelection();
+        clearHints();
+      }
+    });
+
+    window.addEventListener('resize', () => {
+      if (!state.isWon) renderBoard();
+    });
+
+    window.onload = () => {
+      initGame();
+    };
+  </script>
+</body>
+</html>
